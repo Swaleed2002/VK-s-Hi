@@ -1,0 +1,121 @@
+{
+  "collections": [
+    {
+      "name": "users",
+      "description": "User profiles and online presence",
+      "fields": [
+        { "name": "username", "type": "string", "description": "Lowercase unique username" },
+        { "name": "displayName", "type": "string" },
+        { "name": "email", "type": "string" },
+        { "name": "avatarUrl", "type": "string", "optional": true },
+        { "name": "bio", "type": "string", "optional": true },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "lastSeen", "type": "timestamp" },
+        { "name": "isOnline", "type": "boolean" },
+        { "name": "privacySettings", "type": "map", "description": "e.g., { lastSeen: 'everyone', readReceipts: true }" }
+      ],
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && request.auth.uid == documentId",
+        "update": "request.auth != null && request.auth.uid == documentId",
+        "delete": "request.auth != null && request.auth.uid == documentId"
+      }
+    },
+    {
+      "name": "usernames",
+      "description": "Used to enforce globally unique usernames. Document ID is the lowercase username.",
+      "fields": [
+        { "name": "uid", "type": "string" }
+      ],
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && request.resource.data.uid == request.auth.uid",
+        "update": "false",
+        "delete": "request.auth != null && resource.data.uid == request.auth.uid"
+      }
+    },
+    {
+      "name": "blocked",
+      "parent": "users",
+      "description": "Blocked users. Document ID is the blocked user's UID.",
+      "fields": [
+        { "name": "createdAt", "type": "timestamp" }
+      ],
+      "rules": {
+        "read": "request.auth != null && request.auth.uid == parentId",
+        "create": "request.auth != null && request.auth.uid == parentId",
+        "update": "false",
+        "delete": "request.auth != null && request.auth.uid == parentId"
+      }
+    },
+    {
+      "name": "conversations",
+      "description": "Direct and group chats",
+      "fields": [
+        { "name": "type", "type": "string", "description": "'direct' or 'group'" },
+        { "name": "participantIds", "type": "array", "description": "Array of user UIDs" },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "updatedAt", "type": "timestamp" },
+        { "name": "lastMessagePreview", "type": "string", "optional": true },
+        { "name": "lastMessageTime", "type": "timestamp", "optional": true },
+        { "name": "lastMessageSenderId", "type": "string", "optional": true },
+        { "name": "name", "type": "string", "optional": true },
+        { "name": "avatarUrl", "type": "string", "optional": true },
+        { "name": "adminIds", "type": "array", "optional": true }
+      ],
+      "rules": {
+        "read": "request.auth != null && request.auth.uid in resource.data.participantIds",
+        "create": "request.auth != null && request.auth.uid in request.resource.data.participantIds",
+        "update": "request.auth != null && request.auth.uid in resource.data.participantIds",
+        "delete": "request.auth != null && (resource.data.type == 'direct' ? request.auth.uid in resource.data.participantIds : request.auth.uid in resource.data.adminIds)"
+      }
+    },
+    {
+      "name": "messages",
+      "parent": "conversations",
+      "description": "Messages within a conversation",
+      "fields": [
+        { "name": "senderId", "type": "string" },
+        { "name": "type", "type": "string", "description": "'text', 'image', 'video', 'audio', 'file', 'system'" },
+        { "name": "content", "type": "string" },
+        { "name": "fileName", "type": "string", "optional": true },
+        { "name": "fileSize", "type": "number", "optional": true },
+        { "name": "fileType", "type": "string", "optional": true },
+        { "name": "replyToId", "type": "string", "optional": true },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "updatedAt", "type": "timestamp", "optional": true },
+        { "name": "status", "type": "map", "description": "Map of user ID to read/delivered state" },
+        { "name": "deletedFor", "type": "array", "optional": true }
+      ],
+      "rules": {
+        "read": "request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(parentId)).data.participantIds",
+        "create": "request.auth != null && request.auth.uid == request.resource.data.senderId && request.auth.uid in get(/databases/$(database)/documents/conversations/$(parentId)).data.participantIds",
+        "update": "request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(parentId)).data.participantIds",
+        "delete": "request.auth != null && request.auth.uid == resource.data.senderId"
+      }
+    },
+    {
+      "name": "calls",
+      "description": "WebRTC call signaling and history",
+      "fields": [
+        { "name": "type", "type": "string", "description": "'voice' or 'video'" },
+        { "name": "callerId", "type": "string" },
+        { "name": "receiverId", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "endedAt", "type": "timestamp", "optional": true },
+        { "name": "duration", "type": "number", "optional": true },
+        { "name": "offer", "type": "map", "optional": true },
+        { "name": "answer", "type": "map", "optional": true },
+        { "name": "callerCandidates", "type": "array", "optional": true },
+        { "name": "receiverCandidates", "type": "array", "optional": true }
+      ],
+      "rules": {
+        "read": "request.auth != null && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId)",
+        "create": "request.auth != null && request.auth.uid == request.resource.data.callerId",
+        "update": "request.auth != null && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId)",
+        "delete": "false"
+      }
+    }
+  ]
+}

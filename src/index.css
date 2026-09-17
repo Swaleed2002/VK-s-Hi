@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* Custom Audio Player */
+audio.custom-audio::-webkit-media-controls-enclosure {
+  background-color: transparent;
+}
+audio.custom-audio::-webkit-media-controls-panel {
+  background-color: transparent;
+}
+audio.custom-audio {
+  filter: sepia(20%) saturate(70%) grayscale(1) contrast(99%) invert(12%);
+}
+.dark audio.custom-audio {
+  filter: sepia(20%) saturate(70%) grayscale(1) contrast(99%) invert(90%);
+}

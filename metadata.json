@@ -1,0 +1,11 @@
+{
+  "name": "VK's Hi",
+  "description": "A premium Android messaging application with voice/video calling, and media sharing.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
