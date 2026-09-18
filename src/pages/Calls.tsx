@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useCallStore } from '../store/useCallStore';
 import { Avatar } from '../components/ui/Avatar';
 import { Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneCall } from 'lucide-react';
-import { formatTime } from '../lib/utils';
+import { formatTime, cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { APP_CONFIG } from '../config';
 
