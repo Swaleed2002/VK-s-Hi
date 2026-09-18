@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { collection, query, where, getDocs, doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/useAuthStore';
 import { Avatar } from '../components/ui/Avatar';
@@ -13,6 +13,7 @@ export function Contacts() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [openingChat, setOpeningChat] = useState<string | null>(null);
   const { user, profile } = useAuthStore();
   const navigate = useNavigate();
 
@@ -26,11 +27,11 @@ export function Contacts() {
     try {
       let q = query(
         collection(db, 'users'),
-        where('username', '==', searchQuery.toLowerCase().trim())
+        where('username', '==', searchQuery.toLowerCase().trim().replace(/^@+/, ''))
       );
       let snapshot = await getDocs(q);
       
-      let users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      let users = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
       users = users.filter(u => u.id !== user?.uid);
       
       if (users.length === 0) {
@@ -45,26 +46,45 @@ export function Contacts() {
   };
 
   const startChat = async (targetUser: any) => {
-    if (!user || !profile) return;
-    
-    const convId = [user.uid, targetUser.id].sort().join('_');
-    const convRef = doc(db, 'conversations', convId);
-    const convSnap = await getDoc(convRef);
-    
-    if (!convSnap.exists()) {
-      await setDoc(convRef, {
-        type: 'direct',
-        participantIds: [user.uid, targetUser.id],
-        participants: {
-          [user.uid]: { displayName: profile.displayName, avatarUrl: profile.avatarUrl || null },
-          [targetUser.id]: { displayName: targetUser.displayName, avatarUrl: targetUser.avatarUrl || null }
-        },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+    if (openingChat) return;
+    setError('');
+    if (!user || !profile) {
+      setError('Your profile is not loaded. Refresh the page and sign in again.');
+      return;
     }
-    
-    navigate(`/chats/${convId}`);
+
+    setOpeningChat(targetUser.id);
+    try {
+      const convId = [user.uid, targetUser.id].sort().join('_');
+      const convRef = doc(db, 'conversations', convId);
+      // Membership-filtered queries are permitted by the rules even when
+      // no conversation exists yet. A direct get of a missing doc is denied.
+      const existing = await getDocs(query(
+        collection(db, 'conversations'),
+        where('participantIds', 'array-contains', user.uid)
+      ));
+
+      if (!existing.docs.some(conversation => conversation.id === convId)) {
+        await setDoc(convRef, {
+          type: 'direct',
+          participantIds: [user.uid, targetUser.id],
+          participants: {
+            [user.uid]: { displayName: profile.displayName, avatarUrl: profile.avatarUrl || null },
+            [targetUser.id]: { displayName: targetUser.displayName, avatarUrl: targetUser.avatarUrl || null }
+          },
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      navigate(`/chats/${convId}`);
+    } catch (err: any) {
+      console.error('Failed to open conversation', err);
+      setError(err.code === 'permission-denied'
+        ? 'Chat access was denied. Please contact the app administrator.'
+        : 'Unable to open chat. Check your connection and try again.');
+    } finally {
+      setOpeningChat(null);
+    }
   };
 
   return (
@@ -107,8 +127,11 @@ export function Contacts() {
             <button 
               className="p-3 bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 rounded-full hover:bg-emerald-200 dark:hover:bg-emerald-800/40 transition-colors"
               onClick={() => startChat(u)}
+              disabled={openingChat !== null}
+              aria-label={`Chat with ${u.displayName}`}
+              aria-busy={openingChat === u.id}
             >
-              <MessageSquare size={20} />
+              {openingChat === u.id ? '...' : <MessageSquare size={20} />}
             </button>
           </div>
         ))}
