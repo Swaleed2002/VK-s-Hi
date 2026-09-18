@@ -1,143 +1,250 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Trash2, Send, Play, Pause } from 'lucide-react';
-import { Button } from './Button';
+import { Mic, Square, Trash2, Send, Play, Pause, AlertCircle } from 'lucide-react';
 
 interface VoiceRecorderProps {
-  onSend: (audioBlob: Blob, durationMs: number) => void;
+  onSend: (audioBlob: Blob, durationSec: number) => Promise<void>;
   onCancel: () => void;
 }
 
 export function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) {
-  const [isRecording, setIsRecording] = useState(false);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [state, setState] = useState<'idle' | 'recording' | 'preview'>('recording');
   const [duration, setDuration] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  
+  const [error, setError] = useState<string | null>(null);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<any>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => {
-    startRecording();
-    return () => cleanup();
-  }, []);
-
-  const cleanup = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
-    if (mediaRecorderRef.current?.stream) {
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-    }
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
+  // Helper to safely stop microphone stream
+  const releaseStream = () => {
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch (e) {}
+      });
+      audioStreamRef.current = null;
     }
   };
 
   const startRecording = async () => {
+    setError(null);
+    setDuration(0);
+    audioChunksRef.current = [];
+
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Audio recording is not supported in this browser.');
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
+      audioStreamRef.current = stream;
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      // Determine best supported MIME type
+      let mimeType = '';
+      const types = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg'
+      ];
+      for (const t of types) {
+        if (MediaRecorder.isTypeSupported(t)) {
+          mimeType = t;
+          break;
+        }
+      }
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
       };
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
+      recorder.onstop = () => {
+        const type = mimeType || recorder.mimeType || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type });
+        setRecordedBlob(blob);
+        releaseStream();
+        setState('preview');
       };
 
-      mediaRecorder.start(100);
-      setIsRecording(true);
-      
+      recorder.start(100);
+      setState('recording');
+
       timerRef.current = setInterval(() => {
         setDuration(d => d + 1);
       }, 1000);
-    } catch (err) {
-      console.error("Microphone access denied", err);
-      onCancel();
+
+    } catch (err: any) {
+      console.error('Microphone error:', err);
+      releaseStream();
+      let msg = 'Could not access microphone.';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        msg = 'Microphone permission was denied. Please allow access in browser settings.';
+      } else if (err.name === 'NotFoundError') {
+        msg = 'No microphone device was detected.';
+      }
+      setError(msg);
+      setState('idle');
     }
   };
 
-  const stopRecording = () => {
+  useEffect(() => {
+    startRecording();
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      releaseStream();
+    };
+  }, []);
+
+  const handleStopRecording = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
-  const handleSend = () => {
-    if (audioBlob) {
-      onSend(audioBlob, duration * 1000);
+  const handleCancel = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+    }
+    releaseStream();
+    onCancel();
+  };
+
+  const handleSend = async () => {
+    if (!recordedBlob) return;
+    setIsSending(true);
+    try {
+      await onSend(recordedBlob, Math.max(1, duration));
+    } catch (e) {
+      console.error('Send audio error:', e);
+      setError('Failed to send voice message.');
+      setIsSending(false);
     }
   };
 
-  const togglePlayback = () => {
-    if (!audioBlob) return;
-    
-    if (!audioRef.current) {
-      const url = URL.createObjectURL(audioBlob);
-      audioRef.current = new Audio(url);
-      audioRef.current.onended = () => setIsPlaying(false);
+  const togglePreview = () => {
+    if (!previewAudioRef.current && recordedBlob) {
+      const url = URL.createObjectURL(recordedBlob);
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      audio.onended = () => setPreviewPlaying(false);
     }
-    
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+
+    if (previewAudioRef.current) {
+      if (previewPlaying) {
+        previewAudioRef.current.pause();
+        setPreviewPlaying(false);
+      } else {
+        previewAudioRef.current.play();
+        setPreviewPlaying(true);
+      }
     }
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-2xl w-full text-red-600 dark:text-red-400 text-xs">
+        <div className="flex items-center space-x-2">
+          <AlertCircle size={18} className="shrink-0" />
+          <span>{error}</span>
+        </div>
+        <button 
+          onClick={handleCancel}
+          className="ml-2 font-bold underline hover:opacity-80 shrink-0"
+        >
+          Dismiss
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex-1 flex items-center bg-gray-100 dark:bg-gray-900 rounded-2xl px-2 py-1 relative animate-in fade-in zoom-in-95 duration-200">
+    <div className="flex items-center justify-between w-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 rounded-full px-4 py-2 animate-in fade-in duration-200">
       
-      {!audioBlob ? (
-        <>
-          <div className="flex items-center space-x-3 text-red-500 px-3 flex-1">
-            <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-            <span className="font-mono tabular-nums">{formatTime(duration)}</span>
+      {/* Delete / Cancel Button */}
+      <button 
+        type="button"
+        onClick={handleCancel}
+        disabled={isSending}
+        aria-label="Discard recording"
+        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-100/50 rounded-full transition-colors"
+      >
+        <Trash2 size={18} />
+      </button>
+
+      {/* Recording State */}
+      {state === 'recording' && (
+        <div className="flex items-center space-x-3 flex-1 px-4">
+          <div className="relative flex items-center justify-center">
+            <span className="w-3 h-3 rounded-full bg-red-500 animate-ping absolute" />
+            <span className="w-3 h-3 rounded-full bg-red-500 relative" />
           </div>
-          <Button variant="ghost" size="icon" className="text-gray-500 shrink-0 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-full" onClick={onCancel}>
-            <Trash2 size={20} />
-          </Button>
-          <Button size="icon" className="shrink-0 rounded-full h-10 w-10 bg-red-500 hover:bg-red-600 text-white ml-2" onClick={stopRecording}>
-            <Square size={16} className="fill-current" />
-          </Button>
-        </>
-      ) : (
-        <>
-          <Button variant="ghost" size="icon" className="text-gray-500 shrink-0 ml-1 rounded-full" onClick={togglePlayback}>
-            {isPlaying ? <Pause size={20} /> : <Play size={20} className="fill-current" />}
-          </Button>
-          <div className="flex-1 px-3">
-            <div className="h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full w-full overflow-hidden">
-              <div className="h-full bg-emerald-500" style={{ width: '100%' }} />
-            </div>
-          </div>
-          <span className="text-xs text-gray-500 font-mono tabular-nums mr-2">{formatTime(duration)}</span>
-          <Button variant="ghost" size="icon" className="text-gray-500 shrink-0 mr-1 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-full" onClick={onCancel}>
-            <Trash2 size={20} />
-          </Button>
-          <Button size="icon" className="shrink-0 rounded-full h-10 w-10 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleSend}>
-            <Send size={18} className="ml-1 -mt-0.5" />
-          </Button>
-        </>
+          <span className="font-mono text-sm font-semibold text-gray-800 dark:text-gray-200">
+            {formatTime(duration)}
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400 animate-pulse hidden sm:inline">
+            Recording audio...
+          </span>
+        </div>
       )}
+
+      {/* Preview State */}
+      {state === 'preview' && (
+        <div className="flex items-center space-x-3 flex-1 px-4">
+          <button 
+            type="button"
+            onClick={togglePreview}
+            className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-xs"
+          >
+            {previewPlaying ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+          </button>
+          <span className="font-mono text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+            {formatTime(duration)} (Preview)
+          </span>
+        </div>
+      )}
+
+      {/* Action button */}
+      {state === 'recording' ? (
+        <button 
+          type="button"
+          onClick={handleStopRecording}
+          aria-label="Stop recording"
+          className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 rounded-full bg-gray-200 dark:bg-gray-800 transition-colors"
+        >
+          <Square size={16} fill="currentColor" />
+        </button>
+      ) : (
+        <button 
+          type="button"
+          disabled={isSending}
+          onClick={handleSend}
+          aria-label="Send voice message"
+          className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full transition-transform active:scale-90 shadow-md shadow-emerald-600/30 flex items-center justify-center"
+        >
+          <Send size={18} />
+        </button>
+      )}
+
     </div>
   );
 }

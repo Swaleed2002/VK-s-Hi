@@ -1,0 +1,65 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Strictly validates that the path corresponds to a 2-participant conversation (uid1_uid2)
+    // and that the authenticated user is either the first or second participant.
+    // Client-supplied metadata cannot alter or bypass this.
+    function isDirectParticipant(convId) {
+      return convId.matches('^' + request.auth.uid + '_[^_]+$') ||
+             convId.matches('^[^_]+_' + request.auth.uid + '$');
+    }
+
+    // Supported content types: images, videos, audio, standard documents/archives
+    function isValidContentType() {
+      return request.resource.contentType.matches('image/.*') ||
+             request.resource.contentType.matches('video/.*') ||
+             request.resource.contentType.matches('audio/.*') ||
+             request.resource.contentType.matches('application/(pdf|zip|x-zip-compressed|msword|vnd\\..*)') ||
+             request.resource.contentType.matches('text/(plain|csv)');
+    }
+
+    // Validate upload size: max 25MB, positive size
+    function isValidSize() {
+      return request.resource.size > 0 && request.resource.size <= 25 * 1024 * 1024;
+    }
+
+    // Conversation media (photos, videos, voice notes, documents)
+    match /conversations/{conversationId}/{fileName} {
+      // READ: Authenticated user MUST be one of the two conversation participants encoded in the path.
+      // Unrelated User C is strictly DENIED.
+      allow read: if isAuthenticated() && isDirectParticipant(conversationId);
+
+      // CREATE: Strictly new file (no overwrite), MUST be a direct participant,
+      // MUST have valid content type and size <= 25MB.
+      // Client-controlled metadata is not used for authorization.
+      allow create: if isAuthenticated() && 
+                    resource == null &&
+                    isDirectParticipant(conversationId) &&
+                    isValidContentType() &&
+                    isValidSize();
+
+      // UPDATE/OVERWRITE: Strictly forbidden.
+      allow update: if false;
+
+      // DELETE: Only an authenticated direct conversation participant can delete.
+      // request.resource is null on delete operations.
+      allow delete: if isAuthenticated() && isDirectParticipant(conversationId);
+    }
+
+    // User profile avatars
+    match /avatars/{userId}/{fileName} {
+      allow read: if true;
+      allow create, update: if isAuthenticated() && 
+                            request.auth.uid == userId && 
+                            request.resource.size > 0 && 
+                            request.resource.size <= 5 * 1024 * 1024 && 
+                            request.resource.contentType.matches('image/.*');
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}
