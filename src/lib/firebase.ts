@@ -4,21 +4,25 @@ import { initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 // Your web app's Firebase configuration
-// We fetch it from the dynamically injected json from AI Studio environment
 const firebaseConfig = {
-  // This gets populated dynamically in AI Studio. 
-  // We can import it if we know the path, but standard AI Studio injects `firebase-applet-config.json` in the root.
+  projectId: "gen-lang-client-0069655450",
+  appId: "1:720452739533:web:c361f02a7fb11ca0026484",
+  apiKey: "AIzaSyACfL7At9TSCbItYfO4dtLklAkev5lHXPE",
+  authDomain: "gen-lang-client-0069655450.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-2fa678fc-02ab-44fc-80a5-2113c977be53",
+  storageBucket: "gen-lang-client-0069655450.firebasestorage.app",
+  messagingSenderId: "720452739533",
+  measurementId: "",
+  oAuthClientId: "720452739533-br4mhhl3i4ni9hr33ihi1iau3jo8jml5.apps.googleusercontent.com",
+  recaptchaSiteKey: ""
 };
 
-// We will fetch the config json and initialize later in main.tsx or App.tsx, but since we can use import in vite:
-import config from '../../firebase-applet-config.json';
-
-const app = initializeApp(config);
+const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence);
 
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true
-}, config.firestoreDatabaseId);
+}, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app);

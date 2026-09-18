@@ -1,4 +1,4 @@
 export const APP_CONFIG = {
   name: "VK's Hi",
-  logoUrl: "/logo.png",
+  logoUrl: import.meta.env.BASE_URL + "logo.png",
 };
