@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuthStore } from './store/useAuthStore';
 import { useCallStore } from './store/useCallStore';
 import { Splash } from './pages/Splash';
@@ -17,6 +17,7 @@ import { setupPushNotifications } from './lib/pushNotifications';
 
 function PushRouter() {
   const navigate = useNavigate();
+
   useEffect(() => {
     const handlePushNavigate = (e: any) => {
       if (e.detail) {
@@ -26,6 +27,7 @@ function PushRouter() {
     window.addEventListener('pushNavigate', handlePushNavigate);
     return () => window.removeEventListener('pushNavigate', handlePushNavigate);
   }, [navigate]);
+
   return null;
 }
 
@@ -62,7 +64,7 @@ export default function App() {
   }, [initialize]);
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <CallScreen />
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -96,6 +98,6 @@ export default function App() {
         } />
         
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }

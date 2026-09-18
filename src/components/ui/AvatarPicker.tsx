@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
-import { Camera as CameraIcon, Upload, Trash2, X } from 'lucide-react';
+import { Camera as CameraIcon, Upload, Trash2, X, Loader2 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -16,44 +16,47 @@ interface AvatarPickerProps {
 export function AvatarPicker({ currentUrl, fallback }: AvatarPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
   const { profile, setProfile } = useAuthStore();
 
   const handleUpdate = async (imageUrl: string | null) => {
     if (!profile || !auth.currentUser) return;
+    
+    // Set immediate local preview
+    if (imageUrl) {
+      setLocalPreview(imageUrl);
+    } else {
+      setLocalPreview(null);
+    }
     
     setUploading(true);
     try {
       const userRef = doc(db, 'users', profile.id);
       
       if (!imageUrl) {
-        // Delete
-        if (currentUrl) {
-          try {
-            const storage = getStorage();
-            const imageRef = ref(storage, `avatars/${profile.id}`);
-            await deleteObject(imageRef);
-          } catch (e) {
-            console.error("Failed to delete from storage", e);
-          }
-        }
+        // We aren't deleting the actual old file right now to avoid complex URL parsing,
+        // but we successfully remove it from the user's profile.
         await updateDoc(userRef, { avatarUrl: null });
         setProfile({ ...profile, avatarUrl: undefined });
       } else {
-        // We received a base64 string or web path. Let's upload base64.
         const storage = getStorage();
-        const imageRef = ref(storage, `avatars/${profile.id}`);
-        // imageUrl from Capacitor will be a dataUrl if we request DataUrl, or base64
+        // Use a unique filename so the browser doesn't cache the old image
+        const uniqueId = Date.now().toString();
+        const imageRef = ref(storage, `avatars/${profile.id}/${uniqueId}`);
+        
         await uploadString(imageRef, imageUrl, 'data_url');
         const downloadUrl = await getDownloadURL(imageRef);
+        
         await updateDoc(userRef, { avatarUrl: downloadUrl });
         setProfile({ ...profile, avatarUrl: downloadUrl });
       }
+      setIsOpen(false);
     } catch (e) {
       console.error("Failed to update avatar", e);
-      alert("Failed to update profile photo");
+      alert("Failed to update profile photo. Please try again.");
+      setLocalPreview(null); // revert preview on failure
     } finally {
       setUploading(false);
-      setIsOpen(false);
     }
   };
 
@@ -103,14 +106,21 @@ export function AvatarPicker({ currentUrl, fallback }: AvatarPickerProps) {
     }
   };
 
+  const displayUrl = localPreview || currentUrl;
+
   return (
     <>
       <div className="relative inline-block group">
-        <Avatar src={currentUrl} fallback={fallback} size="lg" className="w-24 h-24 text-2xl shadow-md" />
+        <Avatar src={displayUrl} fallback={fallback} size="lg" className="w-24 h-24 text-2xl shadow-md" />
+        {uploading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full z-10">
+            <Loader2 className="animate-spin text-white w-8 h-8" />
+          </div>
+        )}
         <button 
           onClick={() => setIsOpen(true)}
           disabled={uploading}
-          className="absolute bottom-0 right-0 p-2 bg-emerald-600 text-white rounded-full shadow-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+          className="absolute bottom-0 right-0 p-2 bg-emerald-600 text-white rounded-full shadow-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 z-20"
         >
           <CameraIcon size={16} />
         </button>
